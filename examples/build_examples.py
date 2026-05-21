@@ -17,7 +17,6 @@ import kiutils.board
 from kiutils.footprint import Footprint, Pad
 from kiutils.items.common import Net, Position
 
-
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 

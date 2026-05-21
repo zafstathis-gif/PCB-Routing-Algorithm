@@ -1,10 +1,16 @@
 # PCB Autorouter (Multi-Layer A\* + DRC + KiCad I/O + Learned Net Ordering)
 
-A from-scratch PCB autorouter in Python. Routes multi-layer netlists with vias, enforces trace-to-trace clearance, reads and writes real KiCad `.kicad_pcb` files, and includes a **PyTorch reinforcement-learning** track that learns net ordering directly from random boards.
+[![CI](https://github.com/zafstathis-gif/PCB-Routing-Algorithm/actions/workflows/ci.yml/badge.svg)](https://github.com/zafstathis-gif/PCB-Routing-Algorithm/actions/workflows/ci.yml)
+![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+A from-scratch PCB autorouter in Python. Routes multi-layer netlists with vias, enforces trace-to-trace clearance, reads and writes real KiCad `.kicad_pcb` files, and includes a **PyTorch reinforcement-learning** track that learns net ordering directly from random boards plus a **learned A\* heuristic** that cuts search-node expansions.
 
 Built as an ECE portfolio project to explore the algorithmic core of electronic design automation (EDA) — the same family of problems solved by tools like KiCad's `freerouting` or commercial autorouters — and to quantify the gap between heuristic search and a learned policy on small, well-defined tasks.
 
 ![demo](demo_output.png)
+
+A 20×20 2-layer board routed with `clearance=1` and rip-up-and-reroute: black cells are static obstacles, light gray is the per-trace clearance halo, white-outlined circles are vias bridging layers. Animated version: [`routing_demo.gif`](routing_demo.gif).
 
 ## Features
 
@@ -26,9 +32,13 @@ Built as an ECE portfolio project to explore the algorithmic core of electronic 
 ├── pcb_grid.py            # PCBGrid: 3D layer stack, static_mask, halo stamping
 ├── router.py              # Multi-layer A* + sequential routing + R&R + ordering heuristics
 ├── kicad_io.py            # Read/write .kicad_pcb (load_board, save_routed_board)
-├── cli.py                 # python cli.py input.kicad_pcb -o output.kicad_pcb
-├── visualize.py           # Per-layer matplotlib renderer with halo shading
+├── cli.py                 # `pcb-route input.kicad_pcb -o output.kicad_pcb`
+├── app.py                 # Streamlit web demo (random boards + KiCad upload)
+├── visualize.py           # Per-layer matplotlib renderer + animate_board GIF helper
 ├── bench.py               # Benchmark with --layers / --clearance flags
+├── pyproject.toml         # Packaging: pip install -e .[rl,web,dev]
+├── .github/workflows/
+│   └── ci.yml             # Ruff + mypy + pytest on Python 3.9-3.12
 ├── examples/
 │   ├── build_examples.py        # Generates the .kicad_pcb fixtures below
 │   ├── blinker_unrouted.kicad_pcb
@@ -60,24 +70,37 @@ Built as an ECE portfolio project to explore the algorithmic core of electronic 
 ## Quick Start
 
 ```bash
-pip install -r requirements.txt
+# Core install (numpy, matplotlib, kiutils):
+pip install -e .
 
-# Heuristic + RL demos
-python visualize.py                                       # routing demo + matplotlib plot
+# Optional extras:
+pip install -e ".[rl]"     # adds torch for the RL track
+pip install -e ".[web]"    # adds streamlit for the interactive web demo
+pip install -e ".[dev]"    # adds ruff + mypy + pyflakes
+pip install -e ".[rl,web,dev]"   # everything (used by CI)
+
+# Routing demos
+python visualize.py                                       # matplotlib demo plot
 python bench.py                                           # legacy single-layer benchmark
 python bench.py --layers 2 --clearance 1                  # multi-layer + DRC benchmark
+
+# CLI on a KiCad board (works after `pip install -e .`)
+pcb-route examples/blinker_unrouted.kicad_pcb \
+    -o /tmp/blinker_routed.kicad_pcb --rrr
+
+# RL track (requires `[rl]` extra)
 python -m rl.train                                        # Phase 1: REINFORCE          (~2 min CPU)
 python -m rl.train_ppo                                    # Phase 2: PPO + CNN           (~10 min CPU)
 python -m rl.train_ppo_ripup                              # Phase 3: PPO + rip-up        (~30-60 min CPU)
 python -m rl.train_heuristic --boards 2000 --epochs 10    # Phase 4: learned A* heuristic (~5-10 min CPU)
 python -m rl.evaluate                                     # net-ordering policies vs heuristics
 python -m rl.evaluate_heuristic --boards 200              # learned heuristic vs Manhattan A*
-python -m unittest discover tests                         # 86 tests
 
-# KiCad workflow
-python examples/build_examples.py                         # build sample boards
-python cli.py examples/blinker_unrouted.kicad_pcb \
-    -o /tmp/blinker_routed.kicad_pcb --rrr                # route & save
+# Web demo (requires `[web]` extra)
+streamlit run app.py                                      # interactive UI for board / KiCad routing
+
+# Test suite
+python -m unittest discover tests                         # 86 tests
 ```
 
 Programmatic use:
@@ -317,9 +340,13 @@ The improvement degrades gracefully as obstacle density moves outside the traini
 
 - ✅ Multi-layer routing with vias and configurable `VIA_COST`.
 - ✅ Trace-to-trace clearance via halo-on-lock dilation, with a `static_mask` that protects walls/pads during pin-clear.
-- ✅ KiCad `.kicad_pcb` read/write — `kicad_io.py` + the `cli.py` entry point make the router usable on real boards.
+- ✅ KiCad `.kicad_pcb` read/write — `kicad_io.py` + the `pcb-route` CLI entry point make the router usable on real boards.
 - ✅ Phase 3 PPO + rip-up training — converges to 6.25/8 on the held-out test set; honestly *worse* than Phase 1/2, see the discussion above for why and what would actually help.
 - ✅ Learned A\* heuristic — CNN cost-to-go function trained on Dijkstra ground truth; 9% reduction in A\* node expansions on in-distribution boards with 0% path-length cost; admissibility preserved via the `min(learned, manhattan)` clamp.
+- ✅ Packaging — `pyproject.toml` with optional `[rl]`, `[web]`, `[dev]` extras and the `pcb-route` CLI entry point.
+- ✅ GitHub Actions CI — `ruff` + `pyflakes` + `mypy` + `unittest` on Python 3.9-3.12 for every push and PR.
+- ✅ Streamlit web demo (`app.py`) — random-board mode and KiCad-upload mode with the routed file as a download.
+- ✅ Animated routing visualization (`animate_board` → GIF) — used in the README header.
 
 **Still on the list**, in order of expected impact:
 
@@ -327,7 +354,7 @@ The improvement degrades gracefully as obstacle density moves outside the traini
 - **Better Phase 3 RL** — hierarchical action space (choose-net → choose-action) and reward shaping that distinguishes productive rip-ups, on bigger boards where R&R has real room to help.
 - **Trace width > 1 cell.** The halo machinery is already kernel-based, so trace width is one structuring-element parameter away.
 - **Length matching** for high-speed differential pairs.
-- **Interactive web demo + packaging** (Streamlit + `pip install`) so the tool is one click for anyone to try.
+- **Hosted Streamlit Cloud deployment** of `app.py` so the demo runs without a clone.
 
 ## Tech Stack
 

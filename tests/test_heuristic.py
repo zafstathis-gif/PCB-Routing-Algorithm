@@ -13,14 +13,13 @@ import torch
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
-from pcb_grid import PCBGrid                                  # noqa: E402
-from router import route_single_net                           # noqa: E402
-from rl.heuristic_data import (                               # noqa: E402
+from pcb_grid import PCBGrid  # noqa: E402
+from rl.heuristic_data import (  # noqa: E402
     build_examples_for_board,
     dijkstra_from_goal,
     random_board,
 )
-from rl.heuristic_net import (                                # noqa: E402
+from rl.heuristic_net import (  # noqa: E402
     CROP_SIZE,
     MAX_LAYERS,
     HeuristicNet,
@@ -28,6 +27,7 @@ from rl.heuristic_net import (                                # noqa: E402
     make_learned_heuristic,
     scalar_features,
 )
+from router import route_single_net  # noqa: E402
 
 
 class TestDijkstraFromGoal(unittest.TestCase):

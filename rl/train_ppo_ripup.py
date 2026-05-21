@@ -29,14 +29,13 @@ import torch.optim as optim
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
-from rl.env import RoutingEnvRipup                                # noqa: E402
-from rl.policy import CNNActorCriticRipup, action_to_features     # noqa: E402
-from rl.train import (                                             # noqa: E402
+from rl.env import RoutingEnvRipup  # noqa: E402
+from rl.policy import CNNActorCriticRipup, action_to_features  # noqa: E402
+from rl.train import (  # noqa: E402
     BOARD_SIZE,
     N_NETS,
     random_board_and_netlist,
 )
-
 
 N_ITERATIONS = 300
 EPISODES_PER_BATCH = 32

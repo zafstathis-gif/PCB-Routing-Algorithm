@@ -26,11 +26,10 @@ import torch.optim as optim
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
-from pcb_grid import PCBGrid                                     # noqa: E402
-from router import NetPair                                       # noqa: E402
-from rl.env import RoutingEnv                                    # noqa: E402
-from rl.policy import PolicyNet, net_to_features                 # noqa: E402
-
+from pcb_grid import PCBGrid  # noqa: E402
+from rl.env import RoutingEnv  # noqa: E402
+from rl.policy import PolicyNet, net_to_features  # noqa: E402
+from router import NetPair  # noqa: E402
 
 # --- Problem distribution -------------------------------------------------
 BOARD_SIZE = 20

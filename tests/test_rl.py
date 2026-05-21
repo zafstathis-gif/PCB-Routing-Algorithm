@@ -11,9 +11,9 @@ import torch
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
-from pcb_grid import PCBGrid                                     # noqa: E402
-from rl.env import RoutingEnv, RoutingEnvRipup                   # noqa: E402
-from rl.policy import (                                          # noqa: E402
+from pcb_grid import PCBGrid  # noqa: E402
+from rl.env import RoutingEnv, RoutingEnvRipup  # noqa: E402
+from rl.policy import (  # noqa: E402
     CNNActorCritic,
     CNNActorCriticRipup,
     PolicyNet,

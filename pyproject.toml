@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pcb-autorouter"
+version = "0.1.0"
+description = "Multi-layer PCB autorouter with A*, R&R, DRC, KiCad I/O, and a learned A* heuristic."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+authors = [
+    { name = "Eustathios Zafeiropoulos", email = "zafstathis@gmail.com" }
+]
+keywords = ["pcb", "autorouter", "eda", "kicad", "a-star", "reinforcement-learning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+dependencies = [
+    "numpy>=1.23",
+    "matplotlib>=3.5",
+    "kiutils>=1.4",
+]
+
+# Optional extras — install with e.g. `pip install -e .[rl]`.
+[project.optional-dependencies]
+rl = [
+    "torch>=2.0",
+]
+web = [
+    "streamlit>=1.28",
+]
+dev = [
+    "ruff>=0.1",
+    "mypy>=1.0",
+    "pyflakes>=3.0",
+]
+# Convenience target: install everything for development.
+all = [
+    "pcb-autorouter[rl,web,dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/zafstathis-gif/PCB-Routing-Algorithm"
+Repository = "https://github.com/zafstathis-gif/PCB-Routing-Algorithm"
+Issues = "https://github.com/zafstathis-gif/PCB-Routing-Algorithm/issues"
+
+[project.scripts]
+# `pcb-route board.kicad_pcb -o routed.kicad_pcb` after pip install.
+pcb-route = "cli:main"
+
+# Flat-layout module declaration. The project is small and the modules at
+# root are the public API; no need for a `src/` package directory.
+[tool.setuptools]
+py-modules = ["pcb_grid", "router", "kicad_io", "cli", "visualize", "bench"]
+
+[tool.setuptools.packages.find]
+include = ["rl*"]
+exclude = ["tests*", "examples*"]
+
+# Package data — ship the example .kicad_pcb fixtures and trained weights.
+[tool.setuptools.package-data]
+rl = ["*.pt"]
+
+# Linter configuration.
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# Default rule set is conservative; explicitly select what we want.
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # we don't strictly enforce line length
+
+[tool.mypy]
+# `python_version` is set per-job in CI (which spans 3.9-3.12); leaving it
+# unset here lets local mypy pick the installed interpreter.
+ignore_missing_imports = true
+warn_unused_ignores = true

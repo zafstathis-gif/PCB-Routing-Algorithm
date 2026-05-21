@@ -24,14 +24,13 @@ import torch.optim as optim
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
-from rl.env import RoutingEnv                                    # noqa: E402
-from rl.policy import CNNActorCritic, net_to_features            # noqa: E402
-from rl.train import (                                            # noqa: E402
+from rl.env import RoutingEnv  # noqa: E402
+from rl.policy import CNNActorCritic, net_to_features  # noqa: E402
+from rl.train import (  # noqa: E402
     BOARD_SIZE,
     N_NETS,
     random_board_and_netlist,
 )
-
 
 # --- PPO hyperparameters --------------------------------------------------
 N_ITERATIONS = 250

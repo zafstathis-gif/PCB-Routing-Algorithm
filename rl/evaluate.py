@@ -19,31 +19,30 @@ import torch
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
-from pcb_grid import PCBGrid                                     # noqa: E402
-from router import (                                              # noqa: E402
-    ALL_STRATEGIES,
-    NetPair,
-    route_board,
-    route_board_best_of,
-    route_board_rrr,
-)
-from rl.env import RoutingEnv, RoutingEnvRipup                   # noqa: E402
-from rl.policy import (                                            # noqa: E402
+from pcb_grid import PCBGrid  # noqa: E402
+from rl.env import RoutingEnv, RoutingEnvRipup  # noqa: E402
+from rl.policy import (  # noqa: E402
     CNNActorCritic,
     CNNActorCriticRipup,
     PolicyNet,
     action_to_features,
     net_to_features,
 )
-from rl.train import (                                            # noqa: E402
+from rl.train import (  # noqa: E402
     BOARD_SIZE,
     N_NETS,
-    WEIGHTS_PATH as REINFORCE_WEIGHTS,
     random_board_and_netlist,
 )
-from rl.train_ppo import WEIGHTS_PATH as PPO_WEIGHTS              # noqa: E402
+from rl.train import WEIGHTS_PATH as REINFORCE_WEIGHTS  # noqa: E402
+from rl.train_ppo import WEIGHTS_PATH as PPO_WEIGHTS  # noqa: E402
 from rl.train_ppo_ripup import WEIGHTS_PATH as PPO_RIPUP_WEIGHTS  # noqa: E402
-
+from router import (  # noqa: E402
+    ALL_STRATEGIES,
+    NetPair,
+    route_board,
+    route_board_best_of,
+    route_board_rrr,
+)
 
 N_TEST = 200
 EVAL_SEED = 9999

@@ -215,6 +215,184 @@ def visualize_board(
     plt.show()
 
 
+def animate_board(
+    grid: PCBGrid,
+    summary: Union[RouteSummary, BestOfSummary],
+    *,
+    output_path: str,
+    fps: int = 4,
+    cells_per_frame: int = 4,
+) -> None:
+    """Render the routing of `summary` as an animated GIF.
+
+    Each frame extends the currently-drawn paths by `cells_per_frame` cells
+    until every net is fully drawn, then holds for a few frames so the
+    final state is readable when the GIF loops.
+
+    Single-layer boards: one subplot. Multi-layer: per-layer subplots, with
+    vias appearing as the path crosses them.
+
+    Saving a GIF requires Pillow (already a transitive dep of matplotlib).
+    """
+    import matplotlib.animation as anim  # local import keeps top-level fast
+
+    routed = summary["routed"]
+    # animate_board only draws successful nets — unrouted pairs would just
+    # flicker in place and add no information to the animation.
+
+    # Static obstacle / halo masks (same as the static visualizer).
+    static_mask = grid.static_mask.astype(np.int8)
+    halo_mask = grid.layers.astype(np.int8) - static_mask
+    for net in routed:
+        for cell in net["path"]:
+            x, y, z = _unpack_cell(cell)
+            halo_mask[z, y, x] = 0
+    halo_mask = np.clip(halo_mask, 0, 1)
+
+    # Pre-compute the full ordered cell list per (net, layer) segment.
+    # Drawing order: net by net, cell by cell within each net.
+    per_layer_segments: dict[int, list[tuple[int, list[tuple[int, int]]]]] = {
+        z: [] for z in range(grid.num_layers)
+    }
+    via_appearances: list[tuple[int, tuple[int, int]]] = []  # (cell-index, (x,y))
+    cumulative_cells = 0
+    for net_idx, net in enumerate(routed):
+        current_layer = None
+        current_seg: list[tuple[int, int]] = []
+        for cell in net["path"]:
+            x, y, z = _unpack_cell(cell)
+            if z != current_layer:
+                if current_seg and current_layer is not None:
+                    per_layer_segments[current_layer].append((net_idx, current_seg))
+                    current_seg = []
+                if current_layer is not None:
+                    via_appearances.append((cumulative_cells, (x, y)))
+                current_layer = z
+            current_seg.append((x, y))
+            cumulative_cells += 1
+        if current_seg and current_layer is not None:
+            per_layer_segments[current_layer].append((net_idx, current_seg))
+
+    total_cells = sum(
+        len(seg) for layer in per_layer_segments.values() for _, seg in layer
+    )
+    cells_per_frame = max(1, cells_per_frame)
+    n_anim_frames = (total_cells + cells_per_frame - 1) // cells_per_frame
+    hold_frames = max(1, fps)  # hold final frame for ~1 second
+    total_frames = n_anim_frames + hold_frames
+
+    n = grid.num_layers
+    cols = min(n, 2)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(
+        rows, cols,
+        figsize=(min(9, 5 * cols), min(9, 5 * rows)) if n > 1 else (8, 8),
+        squeeze=False,
+    )
+    cmap = plt.get_cmap("tab10" if len(routed) <= 10 else "tab20")
+
+    # Per-layer state: list of Line2D handles, one per net's segment on this layer.
+    per_layer_lines: dict[int, list] = {z: [] for z in range(n)}
+    via_artists: list = []
+
+    def init_axes():
+        for z in range(n):
+            ax = axes[z // cols][z % cols]
+            ax.clear()
+            background = np.where(
+                static_mask[z] > 0, 2,
+                np.where(halo_mask[z] > 0, 1, 0),
+            )
+            ax.imshow(
+                background,
+                cmap=plt.matplotlib.colors.ListedColormap(
+                    ["white", "#dcdcdc", "#222222"]),
+                vmin=0, vmax=2, interpolation="nearest",
+            )
+            ax.set_xticks(np.arange(-0.5, grid.width, 1), minor=True)
+            ax.set_yticks(np.arange(-0.5, grid.height, 1), minor=True)
+            ax.grid(which="minor", color="lightgray", linewidth=0.4)
+            ax.tick_params(which="minor", length=0)
+            ax.set_xlim(-0.5, grid.width - 0.5)
+            ax.set_ylim(grid.height - 0.5, -0.5)
+            ax.set_aspect("equal")
+            if n > 1:
+                ax.set_title(f"Layer {z}")
+            # Pre-create one Line2D per net per layer (initially empty).
+            per_layer_lines[z] = []
+            for net_idx, _ in per_layer_segments[z]:
+                color = cmap(net_idx % cmap.N)
+                line, = ax.plot(
+                    [], [], color=color, linewidth=2.8,
+                    solid_capstyle="round", solid_joinstyle="round",
+                )
+                per_layer_lines[z].append(line)
+
+        # Pin markers (always visible from frame 0).
+        for net_idx, net in enumerate(routed):
+            color = cmap(net_idx % cmap.N)
+            (sx, sy, slayers) = _endpoint_xy_layer(net["pair"][0])
+            (ex, ey, elayers) = _endpoint_xy_layer(net["pair"][1])
+            for z in slayers:
+                if 0 <= z < n:
+                    axes[z // cols][z % cols].plot(
+                        sx, sy, marker="o", color=color,
+                        markersize=10, markeredgecolor="black",
+                        markeredgewidth=1.2,
+                    )
+            for z in elayers:
+                if 0 <= z < n:
+                    axes[z // cols][z % cols].plot(
+                        ex, ey, marker="*", color=color,
+                        markersize=14, markeredgecolor="black",
+                        markeredgewidth=1.0,
+                    )
+
+        # Hide unused subplots.
+        for k in range(n, rows * cols):
+            axes[k // cols][k % cols].axis("off")
+
+    def update(frame_idx: int):
+        cells_drawn = min(total_cells, (frame_idx + 1) * cells_per_frame)
+
+        # For each layer, extend each segment up to its share of cells_drawn.
+        consumed = 0
+        for z in range(n):
+            for line_idx, (net_idx, seg) in enumerate(per_layer_segments[z]):
+                seg_len = len(seg)
+                if consumed >= cells_drawn:
+                    per_layer_lines[z][line_idx].set_data([], [])
+                else:
+                    take = min(seg_len, cells_drawn - consumed)
+                    xs = [c[0] for c in seg[:take]]
+                    ys = [c[1] for c in seg[:take]]
+                    per_layer_lines[z][line_idx].set_data(xs, ys)
+                consumed += seg_len
+
+        # Vias: drawn once the underlying cell is part of `cells_drawn`.
+        for va in via_artists:
+            va.remove()
+        via_artists.clear()
+        for via_at_cell, (vx, vy) in via_appearances:
+            if cells_drawn > via_at_cell:
+                for z in range(n):
+                    ax = axes[z // cols][z % cols]
+                    art, = ax.plot(
+                        vx, vy, marker="o", color="white",
+                        markersize=8, markeredgecolor="black",
+                        markeredgewidth=1.4, zorder=10,
+                    )
+                    via_artists.append(art)
+        return []
+
+    init_axes()
+    animation = anim.FuncAnimation(
+        fig, update, frames=total_frames, interval=1000 // fps, blit=False,
+    )
+    animation.save(output_path, writer="pillow", fps=fps)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     grid = PCBGrid(20, 20)
 

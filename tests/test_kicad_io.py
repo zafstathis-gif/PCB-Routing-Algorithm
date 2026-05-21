@@ -10,19 +10,19 @@ import unittest
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
-import kiutils.board                                                # noqa: E402
+import kiutils.board  # noqa: E402
 
-from kicad_io import (                                              # noqa: E402
+from kicad_io import (  # noqa: E402
     _mm_to_cell,
     _segment_endpoints,
     load_board,
     save_routed_board,
 )
-from router import route_board, route_board_best_of                 # noqa: E402
+from router import route_board, route_board_best_of  # noqa: E402
 
 # Import the example builders for self-contained tests.
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "examples"))
-from build_examples import build_blinker, build_two_layer_demo      # noqa: E402
+from build_examples import build_blinker, build_two_layer_demo  # noqa: E402
 
 
 class TestUnitConversion(unittest.TestCase):

@@ -15,7 +15,6 @@ from typing import Iterable, NamedTuple, Optional
 
 import numpy as np
 
-
 EMPTY: int = 0
 OBSTACLE: int = 1
 

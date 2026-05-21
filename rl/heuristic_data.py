@@ -28,9 +28,8 @@ import numpy as np
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
-from pcb_grid import PCBGrid                                          # noqa: E402
+from pcb_grid import PCBGrid  # noqa: E402
 from rl.heuristic_net import CROP_SIZE, MAX_LAYERS, extract_crop, scalar_features  # noqa: E402
-
 
 # Same defaults as the existing RL training pipeline.
 BOARD_SIZE = 20

@@ -31,11 +31,10 @@ import torch
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
-from pcb_grid import PCBGrid                                     # noqa: E402
-from router import route_single_net                              # noqa: E402
-from rl.heuristic_data import random_board                       # noqa: E402
+from pcb_grid import PCBGrid  # noqa: E402
+from rl.heuristic_data import random_board  # noqa: E402
 from rl.heuristic_net import HeuristicNet, make_learned_heuristic  # noqa: E402
-
+from router import route_single_net  # noqa: E402
 
 N_BOARDS = 200
 PAIRS_PER_BOARD = 5
@@ -57,13 +56,14 @@ def _run_one(grid, start, end, heuristic=None):
     """Route once and return (nodes_expanded, wall_clock_s, path_length)."""
     nodes = [0]
     t0 = time.perf_counter()
-    path = route_single_net(
-        grid, start, end,
-        heuristic=heuristic if heuristic is not None else None,  # type: ignore[arg-type]
-        nodes_expanded=nodes,
-    ) if heuristic is not None else route_single_net(
-        grid, start, end, nodes_expanded=nodes,
-    )
+    if heuristic is not None:
+        path = route_single_net(
+            grid, start, end,
+            heuristic=heuristic,
+            nodes_expanded=nodes,
+        )
+    else:
+        path = route_single_net(grid, start, end, nodes_expanded=nodes)
     dt = time.perf_counter() - t0
     if path is None:
         return None

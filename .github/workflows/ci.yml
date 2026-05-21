@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package + dev/rl extras
+        run: |
+          python -m pip install --upgrade pip
+          # `[rl]` brings in torch for the policy/heuristic networks; `[dev]`
+          # brings in ruff + mypy. We don't install `[web]` (Streamlit) in CI.
+          pip install -e ".[rl,dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Lint (pyflakes via ruff F-codes)
+        # Pyflakes errors are already covered by `ruff check` (F-codes), but
+        # we run it separately as a belt-and-braces sanity check.
+        run: |
+          pip install pyflakes
+          pyflakes pcb_grid.py router.py kicad_io.py cli.py visualize.py bench.py \
+                   rl/env.py rl/policy.py rl/heuristic_net.py rl/heuristic_data.py \
+                   rl/train_heuristic.py rl/evaluate_heuristic.py \
+                   tests/test_router.py tests/test_rl.py \
+                   tests/test_kicad_io.py tests/test_heuristic.py \
+                   examples/build_examples.py
+
+      - name: Type-check (mypy)
+        run: |
+          mypy --ignore-missing-imports --no-incremental \
+            pcb_grid.py router.py visualize.py kicad_io.py cli.py bench.py \
+            rl/env.py rl/policy.py rl/heuristic_net.py rl/heuristic_data.py \
+            rl/train_heuristic.py rl/evaluate_heuristic.py
+
+      - name: Unit tests
+        run: python -m unittest discover tests -v

@@ -31,7 +31,6 @@ import torch.nn as nn
 
 from pcb_grid import PCBGrid
 
-
 CROP_SIZE: int = 11
 MAX_LAYERS: int = 4  # zero-pad shorter stacks so one model fits 1..MAX_LAYERS
 

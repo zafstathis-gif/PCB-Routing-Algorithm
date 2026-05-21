@@ -30,9 +30,8 @@ from torch.utils.data import DataLoader, TensorDataset
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
 
-from rl.heuristic_data import build_dataset                      # noqa: E402
-from rl.heuristic_net import HeuristicNet                         # noqa: E402
-
+from rl.heuristic_data import build_dataset  # noqa: E402
+from rl.heuristic_net import HeuristicNet  # noqa: E402
 
 DEFAULT_WEIGHTS = os.path.join(_HERE, "heuristic_net.pt")
 

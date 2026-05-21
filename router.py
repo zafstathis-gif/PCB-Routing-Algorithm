@@ -23,7 +23,6 @@ import numpy as np
 
 from pcb_grid import Pad, PCBGrid
 
-
 Coord2D = tuple[int, int]
 Coord3D = tuple[int, int, int]
 Coord = Union[Coord2D, Coord3D]
@@ -106,7 +105,7 @@ def _unpack_cell(cell: PathCell, default_layer: int = 0) -> Coord3D:
     """Promote a 2- or 3-tuple path cell to canonical `(x, y, layer)`."""
     if len(cell) == 2:
         return (cell[0], cell[1], default_layer)
-    return cell  # type: ignore[return-value]
+    return cell
 
 
 def _manhattan_xy(a_xy: Coord2D, b_xy: Coord2D) -> int:

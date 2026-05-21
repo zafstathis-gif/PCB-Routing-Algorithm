@@ -17,7 +17,6 @@ import argparse
 from pcb_grid import PCBGrid
 from router import ALL_STRATEGIES, NetPair, route_board, route_board_rrr
 
-
 STATIC_OBSTACLES: list[tuple[int, int]] = [
     (5, 5), (5, 6), (5, 7), (6, 5), (7, 5),
     (10, 8), (10, 9), (10, 10), (10, 11),
