@@ -549,5 +549,71 @@ class TestClearance(unittest.TestCase):
         self.assertTrue(c.is_static_obstacle(2, 2))
 
 
+class TestCustomHeuristic(unittest.TestCase):
+    """The pluggable heuristic kwarg and the nodes_expanded counter."""
+
+    def test_default_heuristic_unchanged(self) -> None:
+        g = PCBGrid(10, 10)
+        path = route_single_net(g, (0, 0), (9, 9))
+        assert path is not None
+        # Optimal manhattan on a clear board.
+        self.assertEqual(len(path), 19)
+
+    def test_custom_heuristic_called(self) -> None:
+        # Custom admissible heuristic: zero everywhere. A* with h=0 is just
+        # Dijkstra — should still find the optimal path. Verify the callable
+        # is invoked at least once and the resulting path is optimal.
+        g = PCBGrid(10, 10)
+        zero_calls = [0]
+
+        def zero_h(node, goal_xy):
+            zero_calls[0] += 1
+            return 0.0
+
+        path_zero = route_single_net(g, (0, 0), (9, 9), heuristic=zero_h)
+        path_manhattan = route_single_net(g, (0, 0), (9, 9))
+
+        assert path_zero is not None and path_manhattan is not None
+        # Both must produce optimal-length paths.
+        self.assertEqual(len(path_zero), len(path_manhattan))
+        self.assertEqual(len(path_zero), 19)  # |dx|+|dy|+1 on an open board
+        # Custom heuristic was invoked many times during the search.
+        self.assertGreater(zero_calls[0], 0)
+
+    def test_custom_heuristic_reduces_expansions_with_obstacles(self) -> None:
+        # On a board with obstacles, Manhattan A* should expand FEWER nodes
+        # than a zero heuristic (Dijkstra). This is the property the learned
+        # heuristic is supposed to amplify.
+        g = PCBGrid(20, 20)
+        # Diagonal wall with a gap.
+        for i in range(15):
+            g.add_obstacle(i, i)
+
+        nodes_zero = [0]
+        path_zero = route_single_net(
+            g, (0, 1), (19, 19),
+            heuristic=lambda n, gxy: 0.0,
+            nodes_expanded=nodes_zero,
+        )
+        nodes_manhattan = [0]
+        path_manhattan = route_single_net(
+            g, (0, 1), (19, 19), nodes_expanded=nodes_manhattan,
+        )
+
+        assert path_zero is not None and path_manhattan is not None
+        self.assertEqual(len(path_zero), len(path_manhattan))
+        self.assertGreater(nodes_zero[0], nodes_manhattan[0])
+
+    def test_nodes_expanded_counter(self) -> None:
+        g = PCBGrid(10, 10)
+        nodes = [0]
+        route_single_net(g, (0, 0), (3, 3), nodes_expanded=nodes)
+        # On a clear 10x10 board with Manhattan heuristic, A* should expand
+        # exactly the cells on the optimal path (and maybe a few tiebreakers).
+        # Just sanity-check the counter is populated.
+        self.assertGreater(nodes[0], 0)
+        self.assertLess(nodes[0], 100)
+
+
 if __name__ == "__main__":
     unittest.main()

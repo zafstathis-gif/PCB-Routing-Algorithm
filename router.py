@@ -17,7 +17,7 @@ stays admissible since all edges cost ≥ 1.0.
 from __future__ import annotations
 
 import heapq
-from typing import Iterable, Optional, TypedDict, Union
+from typing import Callable, Iterable, Optional, TypedDict, Union
 
 import numpy as np
 
@@ -125,9 +125,23 @@ def _bbox_area(pair: NetPair) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _admissible_h(node: Coord3D, goal_xy: Coord2D) -> int:
-    """Manhattan distance to the goal's (x, y) — admissible across all layers."""
+def _admissible_h(node: Coord3D, goal_xy: Coord2D) -> float:
+    """Manhattan distance to the goal's (x, y) — admissible across all layers.
+
+    Used as the default heuristic for `_astar_3d` / `route_single_net`. The
+    callable signature `(node, goal_xy) -> float` is the public contract
+    for custom heuristics (e.g. the learned cost-to-go function in
+    `rl/heuristic_net.py`). A custom heuristic stays optimal iff it
+    underestimates the true cost everywhere; the `min(learned, manhattan)`
+    clamp used by the learned heuristic is admissible by construction.
+    """
     return abs(node[0] - goal_xy[0]) + abs(node[1] - goal_xy[1])
+
+
+# Public type alias for custom A* heuristics. Takes the current node (as a
+# 3D coord) and the goal's (x, y) and returns a non-negative cost-to-go
+# estimate. Must be admissible (≤ true cost) for A* to be optimal.
+HeuristicFn = Callable[[Coord3D, Coord2D], float]
 
 
 def _reconstruct_path(came_from: dict[Coord3D, Coord3D], end: Coord3D) -> list[Coord3D]:
@@ -156,6 +170,8 @@ def _astar_3d(
     *,
     via_cost: float = VIA_COST,
     prefer_directions: bool = False,
+    heuristic: HeuristicFn = _admissible_h,
+    nodes_expanded: Optional[list[int]] = None,
 ) -> Optional[list[Coord3D]]:
     """Multi-source / multi-goal A* on a 3D `PCBGrid`.
 
@@ -164,6 +180,13 @@ def _astar_3d(
         `prefer_directions=True`).
       * vias  (between adjacent layers at the same (x, y)) cost `via_cost`.
 
+    `heuristic(node, goal_xy) -> float` defaults to Manhattan distance.
+    Custom heuristics must be admissible for A* to remain optimal.
+
+    `nodes_expanded`, if provided, is a single-element list used to return
+    the count of nodes popped from the open set — useful for benchmarking
+    heuristics. Pass e.g. `nodes_expanded=[0]` and read `[0]` afterwards.
+
     Returns the lowest-cost path as a list of `(x, y, layer)`, or `None`
     if no goal is reachable.
     """
@@ -171,22 +194,28 @@ def _astar_3d(
     g_score: dict[Coord3D, float] = {}
     came_from: dict[Coord3D, Coord3D] = {}
     counter = 0
+    expansions = 0
 
     for s in starts:
         if not grid.is_valid(s[0], s[1], s[2]):
             continue
         g_score[s] = 0.0
-        heapq.heappush(open_heap, (_admissible_h(s, goals_xy), counter, s))
+        heapq.heappush(open_heap, (heuristic(s, goals_xy), counter, s))
         counter += 1
 
     if not open_heap:
+        if nodes_expanded is not None:
+            nodes_expanded[0] = 0
         return None
 
     num_layers = grid.num_layers
 
     while open_heap:
         _, _, current = heapq.heappop(open_heap)
+        expansions += 1
         if current in goals:
+            if nodes_expanded is not None:
+                nodes_expanded[0] = expansions
             return _reconstruct_path(came_from, current)
 
         current_g = g_score[current]
@@ -203,7 +232,7 @@ def _astar_3d(
             if tentative_g < g_score.get(neighbor, float("inf")):
                 came_from[neighbor] = current
                 g_score[neighbor] = tentative_g
-                f_score = tentative_g + _admissible_h(neighbor, goals_xy)
+                f_score = tentative_g + heuristic(neighbor, goals_xy)
                 heapq.heappush(open_heap, (f_score, counter, neighbor))
                 counter += 1
 
@@ -220,10 +249,12 @@ def _astar_3d(
                 if tentative_g < g_score.get(neighbor, float("inf")):
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g
-                    f_score = tentative_g + _admissible_h(neighbor, goals_xy)
+                    f_score = tentative_g + heuristic(neighbor, goals_xy)
                     heapq.heappush(open_heap, (f_score, counter, neighbor))
                     counter += 1
 
+    if nodes_expanded is not None:
+        nodes_expanded[0] = expansions
     return None
 
 
@@ -234,6 +265,8 @@ def route_single_net(
     *,
     via_cost: float = VIA_COST,
     prefer_directions: bool = False,
+    heuristic: HeuristicFn = _admissible_h,
+    nodes_expanded: Optional[list[int]] = None,
 ) -> Optional[list[PathCell]]:
     """Find a lowest-cost 4-connected (+via) path from `start` to `end`.
 
@@ -242,6 +275,16 @@ def route_single_net(
     input dimensionality: with single-layer 2-tuple inputs the path is a
     list of 2-tuples (existing callers don't break); otherwise it's a list
     of `(x, y, layer)` 3-tuples.
+
+    `heuristic` is a `HeuristicFn` callable; the default is admissible
+    Manhattan distance. A custom heuristic must underestimate the true
+    cost-to-go for A* to remain optimal — the learned-heuristic helper
+    in `rl/heuristic_net.py` wraps its CNN with a `min(learned, manhattan)`
+    clamp so it is admissible by construction.
+
+    `nodes_expanded`, if provided, is a single-element list set to the
+    number of nodes popped from A*'s open set. Used by the heuristic
+    evaluation script.
 
     Returns `None` if either endpoint is invalid or no path exists.
     """
@@ -266,6 +309,7 @@ def route_single_net(
     path_3d = _astar_3d(
         grid, starts, goals, goal_xy,
         via_cost=via_cost, prefer_directions=prefer_directions,
+        heuristic=heuristic, nodes_expanded=nodes_expanded,
     )
     if path_3d is None:
         return None

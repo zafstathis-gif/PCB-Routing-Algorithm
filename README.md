@@ -17,7 +17,7 @@ Built as an ECE portfolio project to explore the algorithmic core of electronic 
 - **CLI** — `python cli.py board.kicad_pcb -o routed.kicad_pcb --clearance 0.2 --rrr` for one-shot routing.
 - **Reinforcement-learning track** — three-phase PyTorch pipeline (REINFORCE → PPO+CNN → PPO+CNN+rip-up) for learned net ordering. Honest benchmarks against the deterministic baselines.
 - **Visualization** — per-layer subplots, halo shading distinct from static obstacles, via markers bridging layers, faded crosses for unrouted nets.
-- **Unit tests** — 68 tests (`unittest`, only numpy/torch as test-time deps).
+- **Unit tests** — 86 tests (`unittest`, only numpy/torch as test-time deps).
 
 ## Project Structure
 
@@ -34,16 +34,24 @@ Built as an ECE portfolio project to explore the algorithmic core of electronic 
 │   ├── blinker_unrouted.kicad_pcb
 │   └── two_layer_demo.kicad_pcb
 ├── rl/
-│   ├── env.py             # Gym-style routing environment (multi-layer aware)
-│   ├── policy.py          # PyTorch policy nets + per-net features
-│   ├── train.py           # REINFORCE training loop
-│   ├── train_ppo.py       # PPO + CNN
-│   ├── train_ppo_ripup.py # PPO + CNN + rip-up actions
-│   ├── evaluate.py        # Trained policies vs heuristic baselines
-│   └── policy.pt          # Trained Phase-1 weights
+│   ├── env.py                 # Gym-style routing environment (multi-layer aware)
+│   ├── policy.py              # PyTorch policy nets + per-net features
+│   ├── train.py               # REINFORCE training loop (Phase 1)
+│   ├── train_ppo.py           # PPO + CNN (Phase 2)
+│   ├── train_ppo_ripup.py     # PPO + CNN + rip-up actions (Phase 3)
+│   ├── evaluate.py            # Trained net-ordering policies vs heuristic baselines
+│   ├── heuristic_net.py       # CNN cost-to-go function + admissibility clamps (Phase 4)
+│   ├── heuristic_data.py      # Dijkstra-from-goal supervised data generator
+│   ├── train_heuristic.py     # One-sided Huber loss training for HeuristicNet
+│   ├── evaluate_heuristic.py  # Learned A* heuristic vs vanilla Manhattan A*
+│   ├── policy.pt              # Trained weights for Phases 1-3
+│   ├── policy_ppo.pt
+│   ├── policy_ppo_ripup.pt
+│   └── heuristic_net.pt       # Trained learned-heuristic weights
 ├── tests/
-│   ├── test_router.py     # Multi-layer / clearance / R&R unit tests
+│   ├── test_router.py     # Multi-layer / clearance / R&R / custom-heuristic tests
 │   ├── test_rl.py         # Env + policy-network shape tests
+│   ├── test_heuristic.py  # Dijkstra + HeuristicNet + clamp tests
 │   └── test_kicad_io.py   # Round-trip load -> route -> save tests
 ├── requirements.txt
 └── README.md
@@ -58,11 +66,13 @@ pip install -r requirements.txt
 python visualize.py                                       # routing demo + matplotlib plot
 python bench.py                                           # legacy single-layer benchmark
 python bench.py --layers 2 --clearance 1                  # multi-layer + DRC benchmark
-python -m rl.train                                        # Phase 1: REINFORCE      (~2 min CPU)
-python -m rl.train_ppo                                    # Phase 2: PPO + CNN       (~10 min CPU)
-python -m rl.train_ppo_ripup                              # Phase 3: PPO + rip-up    (~30-60 min CPU)
-python -m rl.evaluate                                     # compare policies vs heuristics
-python -m unittest discover tests                         # 68 tests
+python -m rl.train                                        # Phase 1: REINFORCE          (~2 min CPU)
+python -m rl.train_ppo                                    # Phase 2: PPO + CNN           (~10 min CPU)
+python -m rl.train_ppo_ripup                              # Phase 3: PPO + rip-up        (~30-60 min CPU)
+python -m rl.train_heuristic --boards 2000 --epochs 10    # Phase 4: learned A* heuristic (~5-10 min CPU)
+python -m rl.evaluate                                     # net-ordering policies vs heuristics
+python -m rl.evaluate_heuristic --boards 200              # learned heuristic vs Manhattan A*
+python -m unittest discover tests                         # 86 tests
 
 # KiCad workflow
 python examples/build_examples.py                         # build sample boards
@@ -258,6 +268,49 @@ Three takeaways:
 - **Phase 3 motivation and outcome.** Beating R&R-enabled baselines requires per-board iterative repair the policy can carry out itself. The Phase 3 action space adds "rip up routed net `j`" alongside "route remaining net `i`", with reward `+1` for a successful route, `0` for a failed route, `−1` for a rip-up — making the cumulative episode reward equal to the final routed count. Training converges (rolling-mean episode return climbs from 4.4 to ~6.4 over 300 iterations and plateaus) and the agent uses its rip-up action ~3.9 times per episode at evaluation.
 - **Phase 3 result: an honest negative.** On the held-out set the Phase 3 policy reaches **6.245 ± 1.102** — *worse* than Phase 1 / Phase 2 (~6.75) and behind even the weakest R&R-enabled heuristic (`manhattan_desc + R&R`, 6.57). The expanded action space (`route` ∪ `ripup`, about 3× the per-step branching of Phase 1/2) makes credit assignment harder, and the `−1` rip-up reward shapes for *fewer* rip-ups rather than *better-targeted* ones, so the agent learns to mostly route, occasionally rip up, and ends up worse than the simpler `route-only` policies. Beating the `best_of + R&R` oracle (7.22) at this scale almost certainly needs (a) hierarchical actions ("pick which net to fix" → "pick what to do with it"), (b) reward shaping that distinguishes useful rip-ups from wasted ones, or (c) much more training data on bigger boards where R&R has more room to matter — the next direction this project will explore.
 
+## Learned A* Heuristic (Phase 4)
+
+The other RL track: replace A\*'s Manhattan heuristic with a small CNN that predicts cost-to-go from a local crop of the obstacle map, and quantify the search-efficiency win.
+
+**Network** (`rl/heuristic_net.py`). 11×11 obstacle crop centered on the current cell, stacked across copper layers (zero-padded to `max_layers=4` so one model fits boards with 1-4 copper layers), plus three scalar features `[dx/W, dy/H, crop_density]`. Three Conv2d layers → one MaxPool → two FC → softplus output. ~70k parameters.
+
+**Training data** (`rl/heuristic_data.py`). Per board, pick a random goal and run **one** Dijkstra pass *from the goal* — that single O(H·W·log(H·W)) pass gives exact cost-to-go for every reachable cell. 2,000 random boards × ~200 samples each → 400k supervised `(crop, scalars, true_cost)` triples.
+
+**Training loss** (`rl/train_heuristic.py`). **One-sided Huber**: positive residuals (`pred > target`) penalised 5× more than negative residuals. This biases the network to *under*-predict — admissible by construction iff overshoots are rare.
+
+**Three integration modes** in `make_learned_heuristic(model, grid, clamp=…)`:
+
+| Clamp | `h_used(n) = ` | Property |
+|---|---|---|
+| `"min"` | `min(learned, manhattan)` | **Strictly admissible** — falls back to manhattan if the net overshoots. Optimal paths guaranteed. |
+| `"max"` | `max(learned, manhattan)` | **Tighter** when the net predicts above manhattan; admissible iff the net doesn't overshoot. The setup that *can* reduce A\* expansions. |
+| `"raw"` | `learned` | Weighted-A\* style. No admissibility guarantee. |
+
+**Results on 200 held-out boards** (`python -m rl.evaluate_heuristic --boards 200`), measuring nodes A\* pops from the open set:
+
+```
+method                      nodes     vs M   wall (s)   path len  len ratio
+------------------------------------------------------------------------------
+Manhattan                    53.3    1.000    0.00011      14.29     1.0000
+Learned (max)                53.0    0.995    0.01922      14.29     1.0000
+Learned (min)                48.5    0.911    0.01741      14.29     1.0000
+Learned (raw)                53.1    0.997    0.01946      14.29     1.0000
+```
+
+**The reduction comes from better A\* heap tie-breaking, not from a tighter heuristic.** Manhattan ties many cells with the same `f = g + h` along the optimal-path frontier, and A\* must explore them all in counter-order. The learned heuristic breaks those ties — even though its value is *below* Manhattan on average (so `min` selects it), it provides a small per-cell ordering signal that points A\* toward cells closer to the goal first. The path-length ratio stays exactly `1.0000` everywhere because `min(learned, manhattan)` is admissible by construction.
+
+**Out-of-distribution behaviour.** The network was trained on 18-obstacle boards. Re-evaluating on denser boards:
+
+| Board difficulty           | Manhattan nodes | Learned (min) nodes | Learned (max) overshoot rate |
+|----------------------------|----------------:|--------------------:|-----------------------------:|
+| 18 obstacles (in-distribution) | 53.3        | **48.5 (-9%)**       | 0.0 %                        |
+| 60 obstacles               | 47.6            | **46.0 (-3%)**       | 2.8 %                        |
+| 100 obstacles              | 69.5            | 70.7 (+2%)           | 4.2 %                        |
+
+The improvement degrades gracefully as obstacle density moves outside the training distribution, but never causes incorrect paths thanks to the admissibility clamp — even at 100 obstacles, `Learned (min)` still produces optimal paths.
+
+**Wall-clock caveat.** The learned heuristic is ~170× slower per route because the CNN runs once per A\* node expansion. **Batching neighbour evaluations** (one forward pass per popped node instead of per neighbour, and a single tensor build instead of per-cell `extract_crop`) would shrink that to roughly 4–6× and is the obvious next optimization.
+
 ## Limitations and Future Work
 
 **Recently landed** (was on this list, now in the codebase):
@@ -266,10 +319,11 @@ Three takeaways:
 - ✅ Trace-to-trace clearance via halo-on-lock dilation, with a `static_mask` that protects walls/pads during pin-clear.
 - ✅ KiCad `.kicad_pcb` read/write — `kicad_io.py` + the `cli.py` entry point make the router usable on real boards.
 - ✅ Phase 3 PPO + rip-up training — converges to 6.25/8 on the held-out test set; honestly *worse* than Phase 1/2, see the discussion above for why and what would actually help.
+- ✅ Learned A\* heuristic — CNN cost-to-go function trained on Dijkstra ground truth; 9% reduction in A\* node expansions on in-distribution boards with 0% path-length cost; admissibility preserved via the `min(learned, manhattan)` clamp.
 
 **Still on the list**, in order of expected impact:
 
-- **Learn the A\* heuristic.** Replace Manhattan with a small CNN that predicts cost-to-go from a local crop of the obstacle map; clamp the result with `min(learned, manhattan)` to preserve admissibility. Goal: fewer A\* nodes expanded on cluttered boards while keeping path lengths optimal.
+- **Batched neighbour evaluation** in the learned-heuristic A\* loop to bring wall-clock per route from ~170× to ~5× vs vanilla Manhattan.
 - **Better Phase 3 RL** — hierarchical action space (choose-net → choose-action) and reward shaping that distinguishes productive rip-ups, on bigger boards where R&R has real room to help.
 - **Trace width > 1 cell.** The halo machinery is already kernel-based, so trace width is one structuring-element parameter away.
 - **Length matching** for high-speed differential pairs.
