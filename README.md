@@ -247,7 +247,7 @@ Three takeaways:
 | **Learned policies**                  |             |        |
 | Phase 1 — REINFORCE + flat MLP        | 6.760       | 1.001  |
 | Phase 2 — PPO + CNN                   | 6.725       | 0.985  |
-| Phase 3 — PPO + CNN + rip-up actions  | *training pipeline complete; weights not yet trained — run `python -m rl.train_ppo_ripup`* | |
+| Phase 3 — PPO + CNN + rip-up actions  | 6.245       | 1.102  |
 
 **Reading the table.**
 
@@ -255,7 +255,8 @@ Three takeaways:
 - **R&R effect.** R&R lifts every strategy. Largest gains are on the *weak* orderings (`manhattan_desc` +0.85, `bbox_area_desc` +0.75) — exactly the cases where the initial greedy pass made the most damaging early decisions. R&R also tightens the variance everywhere.
 - **The current bar.** `best_of + R&R` is the strongest deterministic baseline at **7.22/8 = 90.3%** routed.
 - **REINFORCE vs PPO+CNN (Phase 1 vs Phase 2).** Both learned policies essentially tie the strongest *no-R&R* heuristic (~6.77). The Phase 2 upgrade (CNN + actor-critic + clipped surrogate) did **not** unlock new gains over REINFORCE, because at this scale (8 nets, 20×20 board) the optimal one-shot ordering is well-approximated by "shortest first" — a rule the simpler model already finds. This is an honest negative result: better algorithms only buy you more on harder problems.
-- **Phase 3 motivation.** Beating R&R-enabled baselines requires per-board iterative repair the policy can carry out itself. The Phase 3 action space adds "rip up routed net `j`" alongside "route remaining net `i`", with reward `+1` for a successful route, `0` for a failed route, `−1` for a rip-up — making the cumulative episode reward equal to the final routed count and giving the policy something genuinely non-trivial to learn. The training script (`rl/train_ppo_ripup.py`), env (`RoutingEnvRipup`), and policy (`CNNActorCriticRipup`) are implemented and unit-tested; weights for the held-out comparison have not yet been trained in this session.
+- **Phase 3 motivation and outcome.** Beating R&R-enabled baselines requires per-board iterative repair the policy can carry out itself. The Phase 3 action space adds "rip up routed net `j`" alongside "route remaining net `i`", with reward `+1` for a successful route, `0` for a failed route, `−1` for a rip-up — making the cumulative episode reward equal to the final routed count. Training converges (rolling-mean episode return climbs from 4.4 to ~6.4 over 300 iterations and plateaus) and the agent uses its rip-up action ~3.9 times per episode at evaluation.
+- **Phase 3 result: an honest negative.** On the held-out set the Phase 3 policy reaches **6.245 ± 1.102** — *worse* than Phase 1 / Phase 2 (~6.75) and behind even the weakest R&R-enabled heuristic (`manhattan_desc + R&R`, 6.57). The expanded action space (`route` ∪ `ripup`, about 3× the per-step branching of Phase 1/2) makes credit assignment harder, and the `−1` rip-up reward shapes for *fewer* rip-ups rather than *better-targeted* ones, so the agent learns to mostly route, occasionally rip up, and ends up worse than the simpler `route-only` policies. Beating the `best_of + R&R` oracle (7.22) at this scale almost certainly needs (a) hierarchical actions ("pick which net to fix" → "pick what to do with it"), (b) reward shaping that distinguishes useful rip-ups from wasted ones, or (c) much more training data on bigger boards where R&R has more room to matter — the next direction this project will explore.
 
 ## Limitations and Future Work
 
@@ -264,11 +265,12 @@ Three takeaways:
 - ✅ Multi-layer routing with vias and configurable `VIA_COST`.
 - ✅ Trace-to-trace clearance via halo-on-lock dilation, with a `static_mask` that protects walls/pads during pin-clear.
 - ✅ KiCad `.kicad_pcb` read/write — `kicad_io.py` + the `cli.py` entry point make the router usable on real boards.
+- ✅ Phase 3 PPO + rip-up training — converges to 6.25/8 on the held-out test set; honestly *worse* than Phase 1/2, see the discussion above for why and what would actually help.
 
 **Still on the list**, in order of expected impact:
 
-- **Train the Phase 3 PPO + rip-up policy** to fill in the missing benchmark row.
 - **Learn the A\* heuristic.** Replace Manhattan with a small CNN that predicts cost-to-go from a local crop of the obstacle map; clamp the result with `min(learned, manhattan)` to preserve admissibility. Goal: fewer A\* nodes expanded on cluttered boards while keeping path lengths optimal.
+- **Better Phase 3 RL** — hierarchical action space (choose-net → choose-action) and reward shaping that distinguishes productive rip-ups, on bigger boards where R&R has real room to help.
 - **Trace width > 1 cell.** The halo machinery is already kernel-based, so trace width is one structuring-element parameter away.
 - **Length matching** for high-speed differential pairs.
 - **Interactive web demo + packaging** (Streamlit + `pip install`) so the tool is one click for anyone to try.
