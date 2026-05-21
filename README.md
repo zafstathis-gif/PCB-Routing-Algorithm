@@ -1,38 +1,50 @@
-# PCB Autorouter (A\* + Heuristics + Rip-up-and-Reroute + Learned Net Ordering)
+# PCB Autorouter (Multi-Layer A\* + DRC + KiCad I/O + Learned Net Ordering)
 
-A grid-based PCB autorouter implemented from scratch in Python. Connects pin pairs from a netlist using A\* pathfinding on a 2D obstacle grid, supports shared pins, applies **iterative rip-up-and-reroute** to escape greedy dead-ends, selects the best of several net-ordering heuristics, and includes a **PyTorch reinforcement-learning policy** that learns net ordering directly from random boards via REINFORCE.
+A from-scratch PCB autorouter in Python. Routes multi-layer netlists with vias, enforces trace-to-trace clearance, reads and writes real KiCad `.kicad_pcb` files, and includes a **PyTorch reinforcement-learning** track that learns net ordering directly from random boards.
 
-Built as an ECE portfolio project to explore the algorithmic core of electronic design automation (EDA) — the same family of problems solved by tools like KiCad's `freerouting` or commercial autorouters, in their simplest 2D form — and to quantify the gap between heuristic search and a learned policy on a small, well-defined task.
+Built as an ECE portfolio project to explore the algorithmic core of electronic design automation (EDA) — the same family of problems solved by tools like KiCad's `freerouting` or commercial autorouters — and to quantify the gap between heuristic search and a learned policy on small, well-defined tasks.
 
 ![demo](demo_output.png)
 
 ## Features
 
-- **A\* pathfinding** with the Manhattan-distance heuristic — provably optimal on 4-connected unit-cost grids.
-- **Sequential netlist routing** with shared-pin support: a single pin can serve as the endpoint for multiple nets, as in power and ground rails.
-- **Net-ordering heuristics** — `manhattan_asc`/`desc`, `bbox_area_asc`/`desc`, plus user-order. Net order is the dominant lever for a sequential router; the included benchmark quantifies the effect.
-- **`route_board_best_of`** runs every heuristic and keeps the result that routes the most nets (tie-broken by total trace length). Establishes a strong deterministic baseline.
-- **Rip-up-and-reroute (`route_board_rrr`)** — when a net fails, identify routed nets that block its ideal path, rip them up, retry, and re-route the displaced nets. A real EDA technique, here implemented with per-net rip-up caps and an iteration limit to prevent oscillation. Improves every ordering heuristic on the held-out test set.
-- **Reinforcement-learning policy** for net ordering. A small PyTorch network is trained with REINFORCE (moving-average baseline + entropy bonus) to pick which net to route next given the current board. Matches the strongest single heuristic and beats the user-order baseline by 6.5% on a 200-board test set.
-- **Visualization** — heatmap grid, distinct trace colors per net, circle/star markers for start/end pins, faded crosses + dashed line for nets the router could not connect.
-- **Unit tests** — 20 tests (`unittest`, no third-party dependencies).
+- **Multi-layer A\* pathfinding** with the Manhattan heuristic — admissible across layers because layer-switch (via) cost is treated as 0 in the lower bound. Provably optimal at `clearance=0`; `prefer_directions=True` enables the classical even-horizontal / odd-vertical EDA layer bias.
+- **Through-hole and SMD pads** via a dedicated `Pad(x, y, layers)` type. Multi-source A\* seeds every layer a pad occupies and accepts any goal layer.
+- **Configurable trace-to-trace clearance (DRC)** via halo-on-lock dilation. A `static_mask` distinguishes pads/walls from trace halos, so shared pins still route under clearance without lifting real obstacles.
+- **Sequential netlist routing** with shared-pin support, **five net-ordering heuristics** (`manhattan_asc`/`desc`, `bbox_area_asc`/`desc`, user-order), and `route_board_best_of` to pick the winning ordering automatically.
+- **Rip-up-and-reroute (`route_board_rrr`)** — when a net fails, identify routed nets that block its ideal path, rip them up, retry, and re-route the displaced nets. Real EDA technique with per-net rip-up caps and an iteration limit; halo-aware so it works under non-zero clearance.
+- **KiCad I/O** — `kicad_io.py` reads a `.kicad_pcb` (via `kiutils`), routes every net, and writes `(segment ...)` / `(via ...)` items back to disk. Multi-pad nets are connected via an MST of pad positions.
+- **CLI** — `python cli.py board.kicad_pcb -o routed.kicad_pcb --clearance 0.2 --rrr` for one-shot routing.
+- **Reinforcement-learning track** — three-phase PyTorch pipeline (REINFORCE → PPO+CNN → PPO+CNN+rip-up) for learned net ordering. Honest benchmarks against the deterministic baselines.
+- **Visualization** — per-layer subplots, halo shading distinct from static obstacles, via markers bridging layers, faded crosses for unrouted nets.
+- **Unit tests** — 68 tests (`unittest`, only numpy/torch as test-time deps).
 
 ## Project Structure
 
 ```
 .
-├── pcb_grid.py         # PCBGrid: 2D obstacle grid environment
-├── router.py           # A* + sequential routing + ordering heuristics
-├── visualize.py        # Matplotlib renderer
-├── bench.py            # Compare ordering strategies on a fixed netlist
+├── pcb_grid.py            # PCBGrid: 3D layer stack, static_mask, halo stamping
+├── router.py              # Multi-layer A* + sequential routing + R&R + ordering heuristics
+├── kicad_io.py            # Read/write .kicad_pcb (load_board, save_routed_board)
+├── cli.py                 # python cli.py input.kicad_pcb -o output.kicad_pcb
+├── visualize.py           # Per-layer matplotlib renderer with halo shading
+├── bench.py               # Benchmark with --layers / --clearance flags
+├── examples/
+│   ├── build_examples.py        # Generates the .kicad_pcb fixtures below
+│   ├── blinker_unrouted.kicad_pcb
+│   └── two_layer_demo.kicad_pcb
 ├── rl/
-│   ├── env.py          # Gym-style routing environment
-│   ├── policy.py       # PyTorch policy network + per-net features
-│   ├── train.py        # REINFORCE training loop
-│   ├── evaluate.py     # Trained policy vs heuristic baselines
-│   └── policy.pt       # Trained weights (produced by train.py)
+│   ├── env.py             # Gym-style routing environment (multi-layer aware)
+│   ├── policy.py          # PyTorch policy nets + per-net features
+│   ├── train.py           # REINFORCE training loop
+│   ├── train_ppo.py       # PPO + CNN
+│   ├── train_ppo_ripup.py # PPO + CNN + rip-up actions
+│   ├── evaluate.py        # Trained policies vs heuristic baselines
+│   └── policy.pt          # Trained Phase-1 weights
 ├── tests/
-│   └── test_router.py  # unittest suite (20 tests)
+│   ├── test_router.py     # Multi-layer / clearance / R&R unit tests
+│   ├── test_rl.py         # Env + policy-network shape tests
+│   └── test_kicad_io.py   # Round-trip load -> route -> save tests
 ├── requirements.txt
 └── README.md
 ```
@@ -42,13 +54,20 @@ Built as an ECE portfolio project to explore the algorithmic core of electronic 
 ```bash
 pip install -r requirements.txt
 
-python visualize.py                 # routing demo + matplotlib plot
-python bench.py                     # benchmark ordering heuristics
-python -m rl.train                  # Phase 1: REINFORCE + flat MLP  (~2 min on CPU)
-python -m rl.train_ppo              # Phase 2: PPO + CNN              (~10 min on CPU)
-python -m rl.train_ppo_ripup        # Phase 3: PPO + CNN + rip-up     (~30-60 min on CPU)
-python -m rl.evaluate               # compare all trained policies vs heuristics
-python -m unittest discover tests   # run the test suite (35 tests)
+# Heuristic + RL demos
+python visualize.py                                       # routing demo + matplotlib plot
+python bench.py                                           # legacy single-layer benchmark
+python bench.py --layers 2 --clearance 1                  # multi-layer + DRC benchmark
+python -m rl.train                                        # Phase 1: REINFORCE      (~2 min CPU)
+python -m rl.train_ppo                                    # Phase 2: PPO + CNN       (~10 min CPU)
+python -m rl.train_ppo_ripup                              # Phase 3: PPO + rip-up    (~30-60 min CPU)
+python -m rl.evaluate                                     # compare policies vs heuristics
+python -m unittest discover tests                         # 68 tests
+
+# KiCad workflow
+python examples/build_examples.py                         # build sample boards
+python cli.py examples/blinker_unrouted.kicad_pcb \
+    -o /tmp/blinker_routed.kicad_pcb --rrr                # route & save
 ```
 
 Programmatic use:
@@ -58,31 +77,51 @@ from pcb_grid import PCBGrid
 from router import route_board_best_of
 from visualize import visualize_board
 
-grid = PCBGrid(20, 20)
+# Two-layer board with 1-cell clearance between traces.
+grid = PCBGrid(20, 20, num_layers=2, clearance=1)
 for x, y in [(5, 5), (5, 6), (10, 8), (10, 9)]:
-    grid.add_obstacle(x, y)
+    grid.add_obstacle(x, y, layer=0)
 
 netlist = [
-    ((1, 1), (18, 18)),
-    ((1, 18), (18, 1)),
-    ((6, 6), (16, 6)),
+    ((1, 1, 0), (18, 18, 0)),
+    ((1, 18, 0), (18, 1, 0)),
+    ((6, 6, 0), (16, 6, 0)),
 ]
 
-summary = route_board_best_of(grid, netlist)
+summary = route_board_best_of(grid, netlist, use_rrr=True)
 print(f"Routed {len(summary['routed'])}/{len(netlist)} "
       f"using strategy: {summary['strategy']}")
+for net in summary["routed"]:
+    print(f"  {net['pair']}: {len(net['path'])} cells, {len(net['vias'])} vias")
 visualize_board(grid, summary)
+```
+
+KiCad workflow (programmatic):
+
+```python
+from kicad_io import load_board, save_routed_board
+from router import route_board_best_of
+
+grid, netlist, ctx = load_board(
+    "examples/blinker_unrouted.kicad_pcb",
+    grid_mm=0.5,        # routing grid resolution
+    clearance_mm=0.2,   # trace-to-trace clearance
+)
+summary = route_board_best_of(grid, netlist, use_rrr=True)
+save_routed_board(ctx, summary, "blinker_routed.kicad_pcb")
 ```
 
 ## Algorithmic Notes
 
-### A\* (single net)
+### Multi-layer A\* (single net)
 
 `route_single_net(grid, start, end)`:
 
-- Open set is a binary heap (`heapq`) keyed by `(f, counter, node)`. The counter is a monotonic tiebreaker so the heap never has to compare grid coordinates.
-- `g[n]` = best-known cost from start to n. `h(n)` = Manhattan distance from n to end. `f(n) = g + h`.
-- Manhattan distance is *admissible* and *consistent* on a 4-connected unit-cost grid, so A\* is guaranteed to return the shortest path.
+- Open set is a binary heap (`heapq`) keyed by `(f, counter, node)`. The counter is a monotonic tiebreaker so the heap never has to compare coordinates.
+- Coordinates are `(x, y, layer)` 3-tuples internally. 2-tuple endpoints (`(x, y)`) on single-layer boards are auto-promoted to layer 0 for back-compat.
+- Edges: planar neighbors cost `1.0` (or `1.0/1.2` with `prefer_directions=True`); layer-switches (vias) cost `VIA_COST = 10.0` (configurable per call).
+- Manhattan distance `|dx| + |dy|` is admissible across layers because it underestimates layer-switch cost as `0`. With `prefer_directions=True` the lower bound is still `≥ 1·hops`, so the heuristic remains admissible.
+- Multi-source / multi-goal: through-hole pads (`Pad(x, y, layers=(0, 1, ...))`) seed every layer they occupy with `g=0`, and any layer in the goal pad's `layers` tuple terminates the search.
 - No decrease-key (not supported by `heapq`): when a cheaper `g` is found we re-push the node, and stale pops are filtered by the `tentative_g < g_score[...]` guard.
 
 ### Sequential routing (multiple nets)
@@ -116,7 +155,19 @@ The order in which nets are presented to a sequential router is the dominant dri
 
 Oscillation is bounded by a per-net rip-up cap (`max_ripups_per_net`) and the outer iteration limit. The "ideal path" heuristic is a tighter blocker filter than bounding-box overlap: it identifies the routed nets that an unblocked router would actually run into, not just nets that are merely nearby.
 
-R&R is exposed as a flag everywhere it makes sense: `route_board_best_of(..., use_rrr=True)`, an extra column in `bench.py`, and a separate section in the RL evaluation table.
+R&R is exposed as a flag everywhere it makes sense: `route_board_best_of(..., use_rrr=True)`, an extra column in `bench.py`, and a separate section in the RL evaluation table. The R&R rebuild step is halo-aware, so it remains correct under non-zero clearance.
+
+### Design rules (clearance)
+
+Trace-to-trace clearance is enforced via **halo-on-lock dilation**: each routed path stamps not just its own cells but a Chebyshev `clearance`-radius buffer around them. The buffer is reserved by `PCBGrid.stamp_path`, so the next net's A\* sees those cells as blocked.
+
+`PCBGrid` also keeps a `static_mask` boolean array that records which cells were placed by `add_obstacle` / `add_via` (pads, walls, board outline) as opposed to halos stamped by traces. `_try_route_with_pin_clear` consults this mask: when temporarily clearing the halo around a shared pin so a new net can route out of it, **static obstacles are never lifted** — only trace halos. This keeps walls / adjacent pads safely blocking A\* even mid-search.
+
+### KiCad I/O
+
+`kicad_io.load_board` parses a `.kicad_pcb` file (via `kiutils`), discovers copper layers in stack-up order (`F.Cu`, `In1.Cu`, …, `B.Cu`), maps pads onto a `PCBGrid` (SMD on one layer, through-hole as a via on all layers), stamps any pre-existing traces as static obstacles, and emits a netlist via a per-net minimum spanning tree (Kruskal over pad positions). Existing nets and net numbers are preserved.
+
+`kicad_io.save_routed_board` collapses each routed path into the minimum number of straight `(segment ...)` items per layer and emits a `(via ...)` at every layer transition. The output is a valid KiCad PCB file you can open directly in KiCad and run its own DRC against.
 
 ## Benchmark — Heuristics & R&R
 
@@ -136,6 +187,26 @@ Two effects are visible:
 
 - **Net ordering matters** — every greedy heuristic beats user-order; the spread between best and worst is 2 nets out of 8 (25% of the netlist).
 - **R&R recovers from greedy mistakes** — every strategy improves or ties under R&R, and the `bbox_area_desc + R&R` combination reaches 7/8 (87.5%), strictly better than any greedy result.
+
+### Multi-layer + DRC
+
+Same netlist, with two copper layers and 1-cell clearance (`python bench.py --layers 2 --clearance 1`):
+
+```
+strategy           greedy            + R&R
+--------------------------------------------------
+user-order         8/8  (197 cells)  8/8  (197 cells)
+manhattan_asc      6/8  (127 cells)  7/8  (166 cells)
+manhattan_desc     6/8  (152 cells)  7/8  (167 cells)
+bbox_area_asc      7/8  (154 cells)  8/8  (195 cells)
+bbox_area_desc     6/8  (152 cells)  7/8  (167 cells)
+```
+
+Three takeaways:
+
+- **Multi-layer relieves congestion** — the second copper layer is enough to push most strategies from 5/8 to 7-8/8 even under clearance.
+- **Clearance hurts congestion-sensitive orderings most** — `manhattan_asc` and `bbox_area_desc` drop more than `user-order` because their tightly-packed early routes generate halos that block later nets.
+- **R&R + best-of still wins** — combining `bbox_area_asc + R&R` reaches 8/8 (100%) on this board.
 
 ## Learned Net Ordering (Reinforcement Learning)
 
@@ -188,17 +259,23 @@ Two effects are visible:
 
 ## Limitations and Future Work
 
-This is a 2D grid-based baseline. Concrete next steps, in order of expected impact:
+**Recently landed** (was on this list, now in the codebase):
 
-- **Beat `best_of + R&R` with the RL policy.** The current REINFORCE policy ties the best single greedy heuristic but is behind R&R-enabled baselines. PPO with a value-function critic (lower-variance gradients), a CNN board encoder, and an extended action space (route-next-net **or** rip-up-net-and-retry) is the planned Phase 2/3 path to per-board iterative-repair learned from data.
-- **Learn the A\* heuristic itself.** Replace Manhattan with a small CNN that predicts cost-to-go from the current cell + obstacle pattern; compare path lengths and search-node counts to vanilla A\*.
-- **Multi-layer support** with vias.
-- **Trace width, clearance, and design-rule checks (DRC).**
+- ✅ Multi-layer routing with vias and configurable `VIA_COST`.
+- ✅ Trace-to-trace clearance via halo-on-lock dilation, with a `static_mask` that protects walls/pads during pin-clear.
+- ✅ KiCad `.kicad_pcb` read/write — `kicad_io.py` + the `cli.py` entry point make the router usable on real boards.
+
+**Still on the list**, in order of expected impact:
+
+- **Train the Phase 3 PPO + rip-up policy** to fill in the missing benchmark row.
+- **Learn the A\* heuristic.** Replace Manhattan with a small CNN that predicts cost-to-go from a local crop of the obstacle map; clamp the result with `min(learned, manhattan)` to preserve admissibility. Goal: fewer A\* nodes expanded on cluttered boards while keeping path lengths optimal.
+- **Trace width > 1 cell.** The halo machinery is already kernel-based, so trace width is one structuring-element parameter away.
 - **Length matching** for high-speed differential pairs.
+- **Interactive web demo + packaging** (Streamlit + `pip install`) so the tool is one click for anyone to try.
 
 ## Tech Stack
 
-Python 3.9+, NumPy, matplotlib, PyTorch.
+Python 3.9+, NumPy, matplotlib, PyTorch, [kiutils](https://github.com/mvnmgrx/kiutils) (KiCad I/O).
 
 ## Author
 
