@@ -16,12 +16,13 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from router import NetPair
+from router import NetPair, _endpoint_xy
 
 
 def net_to_features(pair: NetPair, board_size: int) -> list[float]:
     """Hand-engineered features for a candidate net, normalized to [0, 1]."""
-    (sx, sy), (ex, ey) = pair
+    sx, sy = _endpoint_xy(pair[0])
+    ex, ey = _endpoint_xy(pair[1])
     s = float(board_size)
     manhattan = abs(sx - ex) + abs(sy - ey)
     bbox_w = abs(sx - ex) + 1
@@ -55,10 +56,12 @@ class PolicyNet(nn.Module):
         board_size: int = 20,
         board_emb: int = 32,
         net_emb: int = 32,
+        num_layers: int = 1,
     ) -> None:
         super().__init__()
         self.board_size = board_size
-        flat = board_size * board_size
+        self.num_layers = num_layers
+        flat = num_layers * board_size * board_size
 
         self.board_encoder = nn.Sequential(
             nn.Linear(flat, 128),
@@ -115,16 +118,18 @@ class CNNActorCritic(nn.Module):
         board_size: int = 20,
         board_emb_dim: int = 64,
         net_emb_dim: int = 32,
+        num_layers: int = 1,
     ) -> None:
         super().__init__()
         self.board_size = board_size
         self.board_emb_dim = board_emb_dim
         self.net_emb_dim = net_emb_dim
+        self.num_layers = num_layers
 
         # Two MaxPool(2)s reduce 20x20 -> 5x5; assumes board_size is divisible by 4.
         assert board_size % 4 == 0, "board_size must be divisible by 4 for the CNN"
         self.cnn = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1),
+            nn.Conv2d(num_layers, 16, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -158,10 +163,20 @@ class CNNActorCritic(nn.Module):
         )
 
     def encode_board(self, board: torch.Tensor) -> torch.Tensor:
-        """Accept board as (H*W,) or (H, W); return (board_emb_dim,)."""
+        """Encode a board into a fixed-size embedding.
+
+        Accepted input shapes:
+          * (H*W,)            -> single layer, flat (legacy)
+          * (H, W)            -> single layer, 2D
+          * (C, H, W)         -> multi-layer with C channels
+        Returns (board_emb_dim,).
+        """
         if board.dim() == 1:
-            board = board.view(self.board_size, self.board_size)
-        x = board.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+            board = board.view(self.num_layers, self.board_size, self.board_size)
+        elif board.dim() == 2:
+            board = board.unsqueeze(0)  # (1, H, W)
+        # board is now (C, H, W); add batch dim.
+        x = board.unsqueeze(0)  # (1, C, H, W)
         x = self.cnn(x).flatten(start_dim=1)
         return self.board_proj(x).squeeze(0)
 
@@ -206,15 +221,17 @@ class CNNActorCriticRipup(nn.Module):
         board_size: int = 20,
         board_emb_dim: int = 64,
         action_emb_dim: int = 32,
+        num_layers: int = 1,
     ) -> None:
         super().__init__()
         self.board_size = board_size
         self.board_emb_dim = board_emb_dim
         self.action_emb_dim = action_emb_dim
+        self.num_layers = num_layers
 
         assert board_size % 4 == 0, "board_size must be divisible by 4 for the CNN"
         self.cnn = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1),
+            nn.Conv2d(num_layers, 16, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -249,8 +266,10 @@ class CNNActorCriticRipup(nn.Module):
 
     def encode_board(self, board: torch.Tensor) -> torch.Tensor:
         if board.dim() == 1:
-            board = board.view(self.board_size, self.board_size)
-        x = board.unsqueeze(0).unsqueeze(0)
+            board = board.view(self.num_layers, self.board_size, self.board_size)
+        elif board.dim() == 2:
+            board = board.unsqueeze(0)
+        x = board.unsqueeze(0)  # (1, C, H, W)
         x = self.cnn(x).flatten(start_dim=1)
         return self.board_proj(x).squeeze(0)
 

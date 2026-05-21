@@ -18,7 +18,12 @@ from typing import Optional, TypedDict
 import numpy as np
 
 from pcb_grid import PCBGrid
-from router import NetPair, RoutedNet, route_single_net
+from router import (
+    NetPair,
+    RoutedNet,
+    _stamp_path_on_grid,
+    _try_route_with_pin_clear,
+)
 
 
 class Observation(TypedDict):
@@ -27,9 +32,15 @@ class Observation(TypedDict):
 
 
 class RoutingEnv:
-    def __init__(self, width: int = 20, height: int = 20) -> None:
+    def __init__(
+        self,
+        width: int = 20,
+        height: int = 20,
+        num_layers: int = 1,
+    ) -> None:
         self.width = width
         self.height = height
+        self.num_layers = num_layers
         self.grid: Optional[PCBGrid] = None
         self.remaining: list[NetPair] = []
         self.routed: list[RoutedNet] = []
@@ -54,26 +65,14 @@ class RoutingEnv:
                              f"{len(self.remaining)} remaining nets")
 
         pair = self.remaining.pop(action_idx)
-        (sx, sy), (ex, ey) = pair
-
-        # Pin sharing: temporarily un-mark endpoints so a net can begin/end on
-        # a pin already touched by an earlier trace.
-        saved_s = self.grid.grid[sy, sx]
-        saved_e = self.grid.grid[ey, ex]
-        self.grid.grid[sy, sx] = 0
-        self.grid.grid[ey, ex] = 0
-
-        path = route_single_net(self.grid, pair[0], pair[1])
+        path = _try_route_with_pin_clear(self.grid, pair)
 
         if path is None:
-            self.grid.grid[sy, sx] = saved_s
-            self.grid.grid[ey, ex] = saved_e
             self.unrouted.append(pair)
             reward = 0.0
         else:
             self.routed.append({"pair": pair, "path": path})
-            for x, y in path:
-                self.grid.grid[y, x] = 1
+            _stamp_path_on_grid(self.grid, path)
             reward = 1.0
 
         done = len(self.remaining) == 0
@@ -81,7 +80,13 @@ class RoutingEnv:
 
     def _observation(self) -> Observation:
         assert self.grid is not None
-        return {"board": self.grid.grid.copy(), "remaining": list(self.remaining)}
+        # Single-layer back-compat: expose the 2D layer-0 view.
+        # Multi-layer: expose the full 3D layer stack.
+        if self.grid.num_layers == 1:
+            board = self.grid.grid.copy()
+        else:
+            board = self.grid.layers.copy()
+        return {"board": board, "remaining": list(self.remaining)}
 
 
 class RipupObservation(TypedDict):
@@ -124,9 +129,11 @@ class RoutingEnvRipup:
         width: int = 20,
         height: int = 20,
         max_steps: Optional[int] = None,
+        num_layers: int = 1,
     ) -> None:
         self.width = width
         self.height = height
+        self.num_layers = num_layers
         self.max_steps = max_steps  # set at reset() if None
 
         self.static: Optional[PCBGrid] = None
@@ -191,23 +198,13 @@ class RoutingEnvRipup:
     def _do_route(self, idx: int) -> float:
         assert self.grid is not None
         pair = self.remaining.pop(idx)
-        (sx, sy), (ex, ey) = pair
-
-        saved_s = self.grid.grid[sy, sx]
-        saved_e = self.grid.grid[ey, ex]
-        self.grid.grid[sy, sx] = 0
-        self.grid.grid[ey, ex] = 0
-
-        path = route_single_net(self.grid, pair[0], pair[1])
+        path = _try_route_with_pin_clear(self.grid, pair)
         if path is None:
-            self.grid.grid[sy, sx] = saved_s
-            self.grid.grid[ey, ex] = saved_e
             self.failed_attempts.append(pair)
             return 0.0
 
         self.routed.append({"pair": pair, "path": path})
-        for x, y in path:
-            self.grid.grid[y, x] = 1
+        _stamp_path_on_grid(self.grid, path)
         return 1.0
 
     def _do_ripup(self, idx: int) -> float:
@@ -215,10 +212,10 @@ class RoutingEnvRipup:
         net = self.routed.pop(idx)
 
         # Rebuild grid: static obstacles + remaining routed paths.
-        self.grid.grid[:] = self.static.grid
+        self.grid.layers[:] = self.static.layers
+        self.grid.vias = set(self.static.vias)
         for n in self.routed:
-            for x, y in n["path"]:
-                self.grid.grid[y, x] = 1
+            _stamp_path_on_grid(self.grid, n["path"])
 
         # Return the ripped pair to the remaining queue.
         self.remaining.append(net["pair"])
@@ -231,8 +228,12 @@ class RoutingEnvRipup:
 
     def _observation(self) -> RipupObservation:
         assert self.grid is not None
+        if self.grid.num_layers == 1:
+            board = self.grid.grid.copy()
+        else:
+            board = self.grid.layers.copy()
         return {
-            "board": self.grid.grid.copy(),
+            "board": board,
             "remaining": list(self.remaining),
             "routed": [
                 {"pair": n["pair"], "path": list(n["path"])} for n in self.routed

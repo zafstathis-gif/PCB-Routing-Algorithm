@@ -156,6 +156,33 @@ class TestPolicyShapes(unittest.TestCase):
         self.assertEqual(logits.shape, torch.Size([3]))
         self.assertEqual(value.shape, torch.Size([]))
 
+    def test_cnn_actor_critic_multi_layer_shapes(self) -> None:
+        # 2-layer board: input is (num_layers, H, W) = (2, 20, 20).
+        policy = CNNActorCritic(board_size=20, num_layers=2)
+        board = torch.zeros(2, 20, 20)
+        feats = torch.tensor(
+            [net_to_features(((1, 1), (5, 5)), 20)],
+            dtype=torch.float32,
+        )
+        logits, value = policy(board, feats)
+        self.assertEqual(logits.shape, torch.Size([1]))
+        self.assertEqual(value.shape, torch.Size([]))
+
+
+class TestMultiLayerEnv(unittest.TestCase):
+    def test_routing_env_multi_layer_runs(self) -> None:
+        env = RoutingEnv(8, 8, num_layers=2)
+        grid = PCBGrid(8, 8, num_layers=2)
+        # Wall on layer 0 forces a via.
+        for y in range(8):
+            grid.add_obstacle(4, y, layer=0)
+        netlist = [((0, 4, 0), (7, 4, 0))]
+        obs = env.reset(grid, netlist)
+        self.assertEqual(obs["board"].shape, (2, 8, 8))
+        _, reward, done = env.step(0)
+        self.assertEqual(reward, 1.0)
+        self.assertTrue(done)
+
 
 if __name__ == "__main__":
     unittest.main()

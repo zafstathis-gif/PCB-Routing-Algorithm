@@ -1,13 +1,18 @@
 """Benchmark net-ordering strategies on a fixed netlist, with and without R&R.
 
-Run:  python bench.py
+Run:  python bench.py                  # legacy single-layer, clearance=0
+      python bench.py --clearance 1    # enforce 1-cell trace-to-trace clearance
+      python bench.py --layers 2       # 2-layer routing with vias
+      python bench.py --layers 2 --clearance 1
 
 Reports, for each strategy, how many nets were successfully routed (and the
 total trace length) under both plain greedy routing and rip-up-and-reroute.
-Quantifies the effect of (a) net ordering and (b) R&R on success rate.
+Quantifies the effect of (a) net ordering, (b) R&R, and (c) design rules.
 """
 
 from __future__ import annotations
+
+import argparse
 
 from pcb_grid import PCBGrid
 from router import ALL_STRATEGIES, NetPair, route_board, route_board_rrr
@@ -33,22 +38,37 @@ NETLIST: list[NetPair] = [
 ]
 
 
-def make_grid() -> PCBGrid:
-    g = PCBGrid(20, 20)
+def make_grid(num_layers: int, clearance: int) -> PCBGrid:
+    g = PCBGrid(20, 20, num_layers=num_layers, clearance=clearance)
+    # Static obstacles live on layer 0 only — components & wall geometry.
     for x, y in STATIC_OBSTACLES:
-        g.add_obstacle(x, y)
+        g.add_obstacle(x, y, layer=0)
     return g
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--layers", type=int, default=1,
+                        help="Number of routing layers (default 1).")
+    parser.add_argument("--clearance", type=int, default=0,
+                        help="Trace-to-trace clearance in cells (default 0).")
+    args = parser.parse_args()
+
     print(f"Netlist size: {len(NETLIST)}")
-    print(f"Board: 20x20 with {len(STATIC_OBSTACLES)} static obstacles")
+    print(f"Board: 20x20  layers={args.layers}  clearance={args.clearance}")
+    print(f"Static obstacles: {len(STATIC_OBSTACLES)}")
     print()
     print(f"{'strategy':<18} {'greedy':<14} {'+ R&R':<14}")
     print("-" * 50)
     for strategy in ALL_STRATEGIES:
-        plain = route_board(make_grid(), NETLIST, sort_strategy=strategy)
-        rrr = route_board_rrr(make_grid(), NETLIST, sort_strategy=strategy)
+        plain = route_board(
+            make_grid(args.layers, args.clearance),
+            NETLIST, sort_strategy=strategy,
+        )
+        rrr = route_board_rrr(
+            make_grid(args.layers, args.clearance),
+            NETLIST, sort_strategy=strategy,
+        )
 
         plain_cells = sum(len(n["path"]) for n in plain["routed"])
         rrr_cells = sum(len(n["path"]) for n in rrr["routed"])
