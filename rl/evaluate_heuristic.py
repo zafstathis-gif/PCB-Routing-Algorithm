@@ -1,14 +1,14 @@
 """Evaluate the learned A* heuristic vs vanilla Manhattan A* on held-out boards.
 
-Metrics reported:
-  * Mean A* nodes expanded per route (the headline number — the learned
-    heuristic exists to shrink this).
+Reports:
+  * Mean A* nodes expanded per route — the main thing the learned heuristic
+    is supposed to shrink.
   * Mean path-length ratio (learned_path_len / manhattan_path_len). With the
-    `min(learned, manhattan)` clamp this must be 1.000 by construction:
-    sanity check that A* optimality wasn't broken.
-  * Mean wall-clock per route. The honesty check — model inference must not
-    erase the savings from fewer nodes.
-  * Breakdown by obstacle density.
+    `min(learned, manhattan)` clamp this should be 1.000 — a sanity check
+    that A* still finds optimal paths.
+  * Mean wall-clock per route, so we can see whether model inference cancels
+    out the savings from fewer nodes.
+  * A breakdown by obstacle density.
 
 Run from the project root:
 

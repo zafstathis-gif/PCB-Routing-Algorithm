@@ -1,19 +1,14 @@
 """Streamlit web demo for the PCB autorouter.
 
-Launch locally:
+Run locally with:
+
     pip install -e .[web]
     streamlit run app.py
 
-The hosted version (one-click on Streamlit Community Cloud) takes a few
-seconds to load on first request, then routes any random board you generate
-in under a second.
-
-Two modes:
-  1. **Random board**: choose size / layers / clearance / obstacle density /
-     number of nets / strategy / R&R; the app generates a board, routes it,
-     and renders the per-layer result.
-  2. **KiCad upload**: drop a `.kicad_pcb` file in; the app routes it and
-     offers the routed `.kicad_pcb` for download.
+The app has two modes. "Random board" lets you configure board size, layers,
+clearance, obstacle count and number of nets, then generates a board, routes
+it, and shows the per-layer result. "KiCad upload" takes a `.kicad_pcb`
+file, routes it, and offers the routed file as a download.
 """
 
 from __future__ import annotations

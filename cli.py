@@ -1,13 +1,15 @@
 """Command-line entry point for the PCB autorouter.
 
-Usage:
-    python cli.py input.kicad_pcb -o output.kicad_pcb
-    python cli.py input.kicad_pcb -o output.kicad_pcb --clearance 0.2 --grid 0.25
-    python cli.py input.kicad_pcb -o output.kicad_pcb --strategy bbox_area_asc --rrr
+Usage (after `pip install -e .`, the command is registered as `pcb-route`):
 
-The router reads pads + existing traces from `input.kicad_pcb`, routes every
-net, and writes the result to `output.kicad_pcb`. Unrouted nets are logged to
-stderr and left un-traced (the user can open the file in KiCad to inspect).
+    pcb-route input.kicad_pcb -o output.kicad_pcb
+    pcb-route input.kicad_pcb -o output.kicad_pcb --clearance 0.2 --grid 0.25
+    pcb-route input.kicad_pcb -o output.kicad_pcb --strategy bbox_area_asc --rrr
+
+Reads pads and any existing traces from `input.kicad_pcb`, routes every net,
+and writes the result to `output.kicad_pcb`. Unrouted nets are reported on
+stderr and left as un-traced pin connections in the output, so you can open
+the file in KiCad and see exactly which connections still need attention.
 """
 
 from __future__ import annotations

@@ -1,39 +1,24 @@
-"""Read and write `.kicad_pcb` files — turn the router into a usable EDA tool.
+"""Read and write `.kicad_pcb` files so the router can run on real boards.
 
-Pipeline:
+`load_board(path)` parses a `.kicad_pcb` via `kiutils`, builds a `PCBGrid`,
+collects pads grouped by net, and returns a netlist plus a `KiCadContext`
+that remembers how to write the routed result back. `save_routed_board(ctx,
+summary, path)` takes a `RouteSummary` and appends `(segment ...)` and
+`(via ...)` items to the kiutils Board, then writes it out.
 
-    .kicad_pcb  ──load_board──▶  (PCBGrid, netlist, KiCadContext)
-                                    │
-                                    ▼  router.route_board / route_board_rrr / ...
-                                    │
-                                  RouteSummary
-                                    │
-                                    ▼  save_routed_board(ctx, summary, output_path)
-                                    │
-    output.kicad_pcb  ◀───────────────
+A few conversions to keep in mind:
 
-Coordinate system
------------------
-KiCad uses millimeters with origin at the top-left of the page. The router
-uses integer cells with the same origin orientation. Conversion is a uniform
-mm-per-cell scale (default 0.5 mm/cell), so a 50 mm × 30 mm board becomes a
-100 × 60 grid.
-
-Layers
-------
-KiCad copper layers are mapped to router layer indices in stack-up order:
-``F.Cu`` → 0, ``In1.Cu`` → 1, …, ``In(N-2).Cu`` → N-2, ``B.Cu`` → N-1.
-
-Pads
-----
-* **SMD pads** sit on a single copper layer.
-* **Through-hole pads** (``thru_hole``, layers include ``*.Cu``) span every
-  copper layer; they are stamped as vias.
-
-Multi-pad nets
---------------
-KiCad nets can have arbitrarily many pads. We connect them with a minimum-
-spanning-tree of pad positions (Kruskal's): N pads → N−1 routed pairs.
+- **Coordinates.** KiCad uses millimetres with origin at the top-left of
+  the page. The router uses integer cells with the same orientation. The
+  conversion is a uniform mm-per-cell scale (default 0.5 mm/cell), so a
+  50 x 30 mm board becomes a 100 x 60 grid.
+- **Layers.** KiCad copper layers are mapped to router layer indices in
+  stack-up order: ``F.Cu`` -> 0, ``In1.Cu`` -> 1, ..., ``B.Cu`` -> N-1.
+- **Pads.** SMD pads sit on a single copper layer. Through-hole pads
+  (``thru_hole``, layers include ``*.Cu``) span every copper layer and
+  are stamped as vias.
+- **Multi-pad nets.** Nets with more than two pads are connected via a
+  Kruskal MST over pad positions: N pads -> N-1 routed pairs.
 """
 
 from __future__ import annotations

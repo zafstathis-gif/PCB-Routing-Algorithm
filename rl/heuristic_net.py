@@ -1,26 +1,20 @@
-"""Learned A* heuristic — a CNN that predicts cost-to-go from a local crop.
+"""Learned A* heuristic: a small CNN that predicts cost-to-go from a local crop.
 
-Replaces Manhattan distance in `route_single_net(..., heuristic=h)` with a
-small CNN that takes:
+Drops into `route_single_net(..., heuristic=h)` in place of the default
+Manhattan distance. The network takes an 11x11 obstacle crop centred on the
+current cell (stacked across copper layers) plus three scalar features
+`[dx/W, dy/H, crop_density]`, and outputs a non-negative cost-to-go estimate.
 
-  * an 11x11 local crop of the obstacle map centred on the current cell,
-    stacked across copper layers;
-  * a 3-D scalar vector: signed normalised (dx, dy) to the goal plus the
-    crop's obstacle density.
+The model is wrapped with a `min(learned, manhattan)` clamp in
+`make_learned_heuristic`, so A* always sees an admissible heuristic.
 
-and outputs a single non-negative cost-to-go estimate. The model is wrapped
-with a `min(learned, manhattan)` admissibility clamp so that A* always sees
-an admissible heuristic — the network can never make the search incorrect,
-only sometimes more efficient.
-
-Architecture: 3 conv layers + 1 maxpool → flatten → 2-layer MLP → scalar.
-~25k parameters at the default settings.
+Architecture: 3 conv layers + 1 maxpool, then a 2-layer MLP, then a softplus
+scalar. Around 70k parameters at the default settings.
 
 The companion training script `rl/train_heuristic.py` builds supervised
-(crop, scalars, true_cost) triples via Dijkstra-from-goal on random boards
-and trains with a **one-sided Huber loss** that penalises overestimates
-~5x more than underestimates, biasing the network's predictions below
-ground truth so the clamp doesn't waste them.
+`(crop, scalars, true_cost)` triples by running Dijkstra from the goal on
+random boards and trains with a one-sided Huber loss that penalises
+overestimates roughly 5x more than underestimates.
 """
 
 from __future__ import annotations

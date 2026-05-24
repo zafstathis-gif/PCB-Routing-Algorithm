@@ -1,17 +1,16 @@
 """A* pathfinding and sequential netlist routing for PCBGrid.
 
-Internally, every coordinate is the 3-tuple `(x, y, layer)`. Endpoints accept
-2-tuples (single-layer back-compat), 3-tuples, or `Pad` instances (through-hole
-or SMD pads); paths returned by `route_single_net` match the dimensionality of
-the input — a 2-tuple in/out for the single-layer case keeps existing callers
-working unchanged.
+Coordinates are 3-tuples `(x, y, layer)` internally. Endpoints can be
+2-tuples, 3-tuples, or `Pad` instances. Paths returned by `route_single_net`
+match the dimensionality of the input, so callers that pass 2-tuples on a
+single-layer board still get 2-tuple paths back.
 
-Multi-layer routing uses the same A* core. Planar moves cost 1.0; layer
-switches (vias) cost `via_cost` (default `VIA_COST = 10.0`). The Manhattan
-heuristic |dx|+|dy| remains admissible because it underestimates the via cost
-as 0. When `prefer_directions=True`, even layers favor horizontal moves
-(cost 1.0) over vertical (cost 1.2) and odd layers reverse — the heuristic
-stays admissible since all edges cost ≥ 1.0.
+Planar moves cost 1.0, layer switches (vias) cost `VIA_COST = 10.0` by
+default. The Manhattan heuristic `|dx| + |dy|` stays admissible across
+layers because it underestimates the via cost as 0. With
+`prefer_directions=True`, even layers prefer horizontal moves (cost 1.0)
+over vertical (cost 1.2) and odd layers reverse; the heuristic stays
+admissible because every edge still costs at least 1.0.
 """
 
 from __future__ import annotations
@@ -132,7 +131,7 @@ def _admissible_h(node: Coord3D, goal_xy: Coord2D) -> float:
     for custom heuristics (e.g. the learned cost-to-go function in
     `rl/heuristic_net.py`). A custom heuristic stays optimal iff it
     underestimates the true cost everywhere; the `min(learned, manhattan)`
-    clamp used by the learned heuristic is admissible by construction.
+    clamp used by the learned heuristic guarantees admissibility regardless.
     """
     return abs(node[0] - goal_xy[0]) + abs(node[1] - goal_xy[1])
 
@@ -275,11 +274,11 @@ def route_single_net(
     list of 2-tuples (existing callers don't break); otherwise it's a list
     of `(x, y, layer)` 3-tuples.
 
-    `heuristic` is a `HeuristicFn` callable; the default is admissible
-    Manhattan distance. A custom heuristic must underestimate the true
-    cost-to-go for A* to remain optimal — the learned-heuristic helper
-    in `rl/heuristic_net.py` wraps its CNN with a `min(learned, manhattan)`
-    clamp so it is admissible by construction.
+    `heuristic` is a `HeuristicFn` callable; the default is the admissible
+    Manhattan distance. A custom heuristic has to underestimate the true
+    cost-to-go for A* to remain optimal. The learned-heuristic helper in
+    `rl/heuristic_net.py` wraps its CNN with a `min(learned, manhattan)`
+    clamp, which is always admissible since Manhattan is.
 
     `nodes_expanded`, if provided, is a single-element list set to the
     number of nodes popped from A*'s open set. Used by the heuristic
